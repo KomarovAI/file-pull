@@ -1,0 +1,61 @@
+FROM debian:12-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Установка базовых зависимостей и HPN SSH
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates fuse3 fuse3-libs \
+    python3 python3-pip \
+    rclone davfs2 mergerfs curl gnupg nano procps \
+    build-essential git cmake \
+    openssh-client sshfs \
+    wget software-properties-common && \
+    # Установка HPN SSH
+    cd /tmp && \
+    wget https://github.com/rapier1/hpn-ssh/archive/master.zip && \
+    apt-get install -y unzip && \
+    unzip master.zip && \
+    cd hpn-ssh-master && \
+    ./configure --prefix=/usr/local --with-ssl-dir=/usr/lib/ssl && \
+    make && make install && \
+    # Создание симлинка для hpnssh
+    ln -s /usr/local/bin/ssh /usr/local/bin/hpnssh && \
+    # Очистка
+    cd / && rm -rf /tmp/* && \
+    echo 'user_allow_other' >> /etc/fuse.conf && \
+    rm -rf /var/lib/apt/lists/*
+
+# Сетевые оптимизации для HPN SSH
+RUN echo "net.core.rmem_max = 67108864" >> /etc/sysctl.conf && \
+    echo "net.core.wmem_max = 67108864" >> /etc/sysctl.conf && \
+    echo "net.ipv4.tcp_fastopen = 3" >> /etc/sysctl.conf && \
+    echo "net.ipv4.tcp_congestion_control = bbr" >> /etc/sysctl.conf && \
+    echo "net.ipv4.tcp_slow_start_after_idle = 0" >> /etc/sysctl.conf
+
+# Создание пользователя и директорий
+RUN useradd -m -u 1000 app && \
+    mkdir -p /app /data/local /data/unified /mnt/webdav /mnt/rclone /mnt/hpn-remote && \
+    chown -R app:app /app /data /mnt
+
+WORKDIR /app
+
+COPY requirements.txt /app/requirements.txt
+RUN pip3 install --no-cache-dir -r /app/requirements.txt
+
+COPY src/ /app/src/
+COPY scripts/ /app/scripts/
+COPY configs/ /app/configs/
+
+RUN chmod +x /app/scripts/*.sh
+
+USER root
+
+# SSH директория для конфигурации
+RUN mkdir -p /root/.ssh && chmod 700 /root/.ssh
+
+# Sudoers для монтирования
+RUN echo 'app ALL=(ALL) NOPASSWD: /usr/bin/mount, /usr/bin/umount, /usr/bin/mount.davfs, /usr/bin/fusermount3, /usr/bin/sshfs, /usr/local/bin/hpnssh' >> /etc/sudoers
+
+USER app
+
+CMD ["/bin/bash","-lc","/app/scripts/setup.sh && python /app/src/main.py"]
