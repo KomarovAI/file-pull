@@ -1,0 +1,35 @@
+version: '3.8'
+services:
+  file-pull:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: file-pull
+    privileged: true
+    cap_add:
+      - SYS_ADMIN
+      - MKNOD
+      - SYS_RESOURCE
+    devices:
+      - /dev/fuse:/dev/fuse
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Moscow
+      - WEBDAV_URL=${WEBDAV_URL}
+      - WEBDAV_USER=${WEBDAV_USER}
+      - WEBDAV_PASSWORD=${WEBDAV_PASSWORD}
+      - RCLONE_CONFIG_PATH=/app/configs/rclone.conf
+      - LOCAL_STORAGE_PATH=/data/local
+      - MERGER_MOUNT_POINT=/data/unified
+      - MERGER_POLICY=mfs
+    volumes:
+      - ./configs:/app/configs:rw
+      - ./data/local:/data/local:rw
+      - ./data/unified:/data/unified:rshared,rw
+      - ./logs:/var/log/file-pull:rw
+    security_opt:
+      - apparmor:unconfined
+    restart: unless-stopped
+    command: ["/bin/bash","-lc","/app/scripts/setup.sh && python /app/src/main.py"]
+

@@ -1,0 +1,4 @@
+rclone==1.64.2
+psutil==6.0.0
+pyyaml==6.0.2
+loguru==0.7.2
