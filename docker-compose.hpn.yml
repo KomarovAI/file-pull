@@ -1,0 +1,95 @@
+version: '3.8'
+
+services:
+  file-pull-hpn:
+    build:
+      context: .
+      dockerfile: Dockerfile.hpn
+    container_name: file-pull-hpn
+    hostname: file-pull-hpn
+    privileged: true  # Необходимо для FUSE и сетевых оптимизаций
+    
+    cap_add:
+      - SYS_ADMIN
+      - MKNOD
+      - SYS_RESOURCE
+      - NET_ADMIN  # Для сетевых оптимизаций
+      
+    devices:
+      - /dev/fuse:/dev/fuse
+      
+    volumes:
+      # Конфигурации
+      - ./configs:/app/configs:rw
+      - ./scripts:/app/scripts:ro
+      
+      # SSH ключи (создаются автоматически)
+      - ./ssh_keys:/root/.ssh:rw
+      
+      # Локальные точки монтирования
+      - ./data/local:/data/local:rw
+      - ./data/unified:/data/unified:rshared,rw
+      - ./data/hpn-remote:/mnt/hpn-remote:rshared,rw
+      
+      # Логи
+      - ./logs:/var/log/file-pull:rw
+      
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Moscow
+      
+      # HPN SSH настройки (настройте в .env файле)
+      - HPN_ENABLED=${HPN_ENABLED:-false}
+      - HPN_REMOTE_HOST=${HPN_REMOTE_HOST}
+      - HPN_REMOTE_USER=${HPN_REMOTE_USER}
+      - HPN_REMOTE_PORT=${HPN_REMOTE_PORT:-2222}
+      - HPN_REMOTE_PATH=${HPN_REMOTE_PATH:-/home}
+      
+      # Обычные настройки file-pull
+      - WEBDAV_URL=${WEBDAV_URL}
+      - WEBDAV_USER=${WEBDAV_USER}
+      - WEBDAV_PASSWORD=${WEBDAV_PASSWORD}
+      - RCLONE_CONFIG_PATH=/app/configs/rclone.conf
+      - LOCAL_STORAGE_PATH=/data/local
+      - MERGER_MOUNT_POINT=/data/unified
+      - MERGER_POLICY=mfs
+      
+    ports:
+      - "8080:8080"  # Веб-интерфейс для мониторинга (опционально)
+      
+    security_opt:
+      - apparmor:unconfined
+      
+    restart: unless-stopped
+    
+    # Сетевые оптимизации для HPN SSH
+    sysctls:
+      - net.core.rmem_max=67108864
+      - net.core.wmem_max=67108864
+      - net.ipv4.tcp_fastopen=3
+      - net.ipv4.tcp_congestion_control=bbr
+      - net.ipv4.tcp_slow_start_after_idle=0
+      
+    networks:
+      - file-pull-network
+    
+    # Команда запуска
+    command: ["/bin/bash", "-lc", "/app/scripts/setup.sh && python3 /app/src/main.py"]
+    
+    # Проверка здоровья
+    healthcheck:
+      test: ["CMD", "python3", "-c", "from src.hpn_ssh_manager import HPNSSHManager; import os; print('OK' if os.path.exists('/data/unified') else 'FAIL')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+networks:
+  file-pull-network:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: br-file-pull
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
